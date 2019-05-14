@@ -72,8 +72,17 @@ long long int distance_sqr_between_image_arrays(uchar *img_arr1, uchar *img_arr2
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-__device__ uchar arr_min(uchar arr[], int arr_size) {
-    return 0; //TODO
+__device__ int arr_min(int arr[], int arr_size) {//return the min
+	int tid = threadIdx.x;
+	int half_length = arr_size / 2;
+	while (half_length >= 1) {
+		for (int i = tid; i < half_length; i += blockDim.x) {
+			if(arr[tid + i] < arr[i]) arr[i] = arr[tid + i];
+		}
+		__syncthreads();
+		half_length /= 2;
+		}
+    return arr[0]; //TODO
 }
 
 // this function implements the Kiggle-Stone algorithm
@@ -101,6 +110,12 @@ __device__ void prefix_sum(int arr[], int arr_size, int histogram[]) {
  	}
 
     return;
+}
+
+__device__ void mapCalc(int map[], int min, int cdf[]){
+	int id = threadIdx.x;
+	int map_value = (cdf[id] - min) / (IMG_WIDTH * IMG_HEIGHT - min) * 255;
+    map[id] = map_value;
 }
 
 __global__ void process_image_kernel(uchar *in, uchar *out, int temp_histogram[], int temp_cdf[]) {
@@ -134,23 +149,23 @@ __global__ void process_image_kernel(uchar *in, uchar *out, int temp_histogram[]
 
 	__syncthreads();
 
-    //int cdf_min = 0;
-    //for (int i = 0; i < 256; i++) {
-    //    if (cdf[i] != 0) {
-    //        cdf_min = cdf[i];
-    //        break;
-    //    }
-    //}
+    int min = arr_min(l_histogram, 256);
+	
+	temp_cdf[tid] = l_histogram[tid];
+	
+	__syncthreads();
 
-    //uchar map[256] = { 0 };
-    //for (int i = 0; i < 256; i++) {
-    //    int map_value = (float)(cdf[i] - cdf_min) / (IMG_WIDTH * IMG_HEIGHT - cdf_min) * 255;
-    //    map[i] = (uchar)map_value;
-    //}
+    int map[256] = { 0 };
+	mapCalc(map, min, l_cdf);
+	
+	__syncthreads();
+    
 
-    //for (int i = 0; i < IMG_WIDTH * IMG_HEIGHT; i++) {
-    //    img_out[i] = map[img_in[i]];
-    //}
+    for(int i = tid; i < IMG_WIDTH * IMG_HEIGHT; i += tbsize){
+		out[i] = map[in[i]];
+    }
+	
+	__syncthreads();
 
     return ; //TODO
 }
@@ -249,8 +264,17 @@ int main() {
 
 		printf("\n\n");
 		}
+		cudaMemcpy(&images_out_gpu_serial[i*IMG_HEIGHT*IMG_WIDTH], image_out, IMG_WIDTH*IMG_HEIGHT, cudaMemcpyDefault);
 
     }
+	
+	cudaFree(image_in);
+	cudaFree(image_out);
+	//////////////////////////TODO: remove later
+	cudaFree(temp_histogram);
+	cudaFree(temp_cdf);
+	
+	
     //   1. copy the relevant image from images_in to the GPU memory you allocated CHECKED
     //   2. invoke GPU kernel on this image
     //   3. copy output from GPU memory to relevant location in images_out_gpu_serial
@@ -265,6 +289,14 @@ int main() {
     //TODO: copy all input images from images_in to the GPU memory you allocated
     //TODO: invoke a kernel with N_IMAGES threadblocks, each working on a different image
     //TODO: copy output images from GPU memory to images_out_gpu_bulk
+	CUDA_CHECK( cudaMalloc((void **)&image_in, N_IMAGES * IMG_HEIGHT * IMG_WIDTH) );
+    CUDA_CHECK( cudaMalloc((void **)&image_out, N_IMAGES * IMG_HEIGHT * IMG_WIDTH) );
+	cudaMemcpy(image_in, images_in, N_IMAGES*IMG_WIDTH*IMG_HEIGHT, cudaMemcpyDefault);
+	process_image_kernel <<< N_IMAGES, NUM_THREADS >>> (image_in, image_out, temp_histogram, temp_cdf);   
+	cudaMemcpy(images_out_gpu_bulk, image_out, N_IMAGES*IMG_WIDTH*IMG_HEIGHT, cudaMemcpyDefault);	
+	cudaFree(image_in);
+	cudaFree(image_out);
+	
     t_finish = get_time_msec(); //Do not change
     distance_sqr = distance_sqr_between_image_arrays(images_out_cpu, images_out_gpu_bulk); // Do not change
     printf("total time %f [msec]  distance from baseline %lld (should be zero)\n", t_finish - t_start, distance_sqr); //Do not chhange
