@@ -75,13 +75,14 @@ long long int distance_sqr_between_image_arrays(uchar *img_arr1, uchar *img_arr2
 __device__ int arr_min(int arr[], int arr_size) {//return the min
 	int tid = threadIdx.x;
 	int half_length = arr_size / 2;
+
 	while (half_length >= 1) {
 		for (int i = tid; i < half_length; i += blockDim.x) {
 			if(arr[tid + i] < arr[i]) arr[i] = arr[tid + i];
 		}
 		__syncthreads();
 		half_length /= 2;
-		}
+	}
     return arr[0]; //TODO
 }
 
@@ -142,16 +143,19 @@ __global__ void process_image_kernel(uchar *in, uchar *out, int temp_histogram[]
 
 	__syncthreads();
 
-//	prefix_sum <<< 254/2, 2 >>> (cdf, 256, histogram);
-
 	prefix_sum(l_cdf, 256, l_histogram);
 
+	// for debug purposes TODO: delete
 	temp_cdf[tid] = l_cdf[tid];
 
 	__syncthreads();
 
     int min = arr_min(l_histogram, 256);
+    
+    if(tid == 0)
+    	printf("min is: %d\n", min);
 	
+	// for debug purposes TODO: delete
 	temp_cdf[tid] = l_histogram[tid];
 	
 	__syncthreads();
@@ -161,7 +165,7 @@ __global__ void process_image_kernel(uchar *in, uchar *out, int temp_histogram[]
 	__syncthreads();
     
 
-    for(int i = tid; i < IMG_WIDTH * IMG_HEIGHT; i += tbsize){
+    for(int i = tid; i < IMG_WIDTH * IMG_HEIGHT; i += tbsize) {
 		out[i] = map[in[i]];
     }
 	
@@ -243,28 +247,40 @@ int main() {
 
 		// Debug prints TODO: remove later
 		printf ("\n\nHistogram array is as followed:\n");
-		for (int i=0; i< 4; i++) {
+		for (int m=0; m< 4; m++) {
 			for (int j = 0; j < 64; j++) {
-				printf("h[%d] = %d  ",i*64 + j , cpu_histogram[i*64 + j]);
+				printf("h[%d] = %d  ",m*64 + j , cpu_histogram[m*64 + j]);
+				total_sum += cpu_histogram[m*64 + j];
 			}
 
-		printf("\n\n");
+			printf("\n\n");
 		}
 
-		for(int i = 0; i < 256; i++)
-			total_sum += cpu_histogram[i];
-
+		// TODO: delete
 		printf("Total sum is: %d\n", total_sum);
 
+		// TODO: delete
 		printf ("\n\nCDF array is as followed:\n");
-		for (int i=0; i< 4; i++) {
+		for (int m=0; m < 4; m++) {
 			for (int j = 0; j < 64; j++) {
-				printf("h[%d] = %d  ",i*64 + j , cpu_cdf[i*64 + j]);
+				printf("h[%d] = %d  ",m*64 + j , cpu_cdf[m*64 + j]);
 			}
 
-		printf("\n\n");
+			printf("\n\n");
 		}
-		cudaMemcpy(&images_out_gpu_serial[i*IMG_HEIGHT*IMG_WIDTH], image_out, IMG_WIDTH*IMG_HEIGHT, cudaMemcpyDefault);
+
+		cudaMemcpy(&images_out_gpu_serial[i * IMG_HEIGHT*IMG_WIDTH], image_out, IMG_WIDTH*IMG_HEIGHT, cudaMemcpyDefault);
+
+		bool bad = 0;
+		for(int m = 0; m < IMG_WIDTH * IMG_HEIGHT; m++) {
+			if (images_out_gpu_serial[(i*IMG_WIDTH*IMG_HEIGHT) + m] != images_out_cpu[(i*IMG_WIDTH*IMG_HEIGHT) + m]) {
+				printf("CPU value[%d]: %d\n",m, images_out_cpu[(i*IMG_WIDTH*IMG_HEIGHT) + m]);
+				printf("GPU value[%d]: %d\n",m, images_out_gpu_serial[(i*IMG_WIDTH*IMG_HEIGHT) + m]);
+				bad = 1;
+				break;
+			}
+		}
+		printf("\n%s\n", (bad) ? "Failed" : "Success");
 
     }
 	
@@ -274,10 +290,6 @@ int main() {
 	cudaFree(temp_histogram);
 	cudaFree(temp_cdf);
 	
-	
-    //   1. copy the relevant image from images_in to the GPU memory you allocated CHECKED
-    //   2. invoke GPU kernel on this image
-    //   3. copy output from GPU memory to relevant location in images_out_gpu_serial
     t_finish = get_time_msec(); //Do not change
     distance_sqr = distance_sqr_between_image_arrays(images_out_cpu, images_out_gpu_serial); // Do not change
     printf("total time %f [msec]  distance from baseline %lld (should be zero)\n", t_finish - t_start, distance_sqr); //Do not change
