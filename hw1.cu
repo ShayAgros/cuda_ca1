@@ -112,9 +112,9 @@ __device__ void prefix_sum(int arr[], int arr_size, int histogram[]) {
     return;
 }
 
-__device__ void mapCalc(int map[], int min, int cdf[]){
+__device__ void mapCalc(int map[], int min, int cdf[]) {
 	int id = threadIdx.x;
-	int map_value = (cdf[id] - min) / (IMG_WIDTH * IMG_HEIGHT - min) * 255;
+	int map_value = ((double)(cdf[id] - min)/(IMG_WIDTH * IMG_HEIGHT - min)) * 255;
     map[id] = map_value;
 }
 
@@ -122,6 +122,7 @@ __global__ void process_image_kernel(uchar *in, uchar *out, int temp_histogram[]
 
     __shared__ int l_histogram[256];
     __shared__ int l_cdf[256];
+    __shared__ int map[256];
 	int tid = threadIdx.x;
 	int tbsize = blockDim.x;
 
@@ -155,7 +156,6 @@ __global__ void process_image_kernel(uchar *in, uchar *out, int temp_histogram[]
 	
 	__syncthreads();
 
-    int map[256] = { 0 };
 	mapCalc(map, min, l_cdf);
 	
 	__syncthreads();
