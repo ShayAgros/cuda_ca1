@@ -125,13 +125,17 @@ __global__ void process_image_kernel(uchar *in, uchar *out, int temp_histogram[]
     __shared__ int l_cdf[256];
     __shared__ int map[256];
 	int tid = threadIdx.x;
+	int bid = blockIdx.x;
 	int tbsize = blockDim.x;
 
 	// zero histogram
 	l_histogram[tid] = 0;
 
+	if(!tid)
+		printf("bid is: %d\n", bid);
+
 	for(int i = tid; i < IMG_WIDTH * IMG_HEIGHT; i += tbsize)
-		atomicAdd(&l_histogram[in[i]], 1);
+		atomicAdd(&l_histogram[in[(IMG_WIDTH * IMG_HEIGHT)*bid + i]], 1);
 
 	__syncthreads();
 
@@ -166,7 +170,7 @@ __global__ void process_image_kernel(uchar *in, uchar *out, int temp_histogram[]
     
 
     for(int i = tid; i < IMG_WIDTH * IMG_HEIGHT; i += tbsize) {
-		out[i] = map[in[i]];
+		out[i] = map[in[(IMG_WIDTH * IMG_HEIGHT)*bid + i]];
     }
 	
 	__syncthreads();
@@ -241,6 +245,22 @@ int main() {
 
 		cudaDeviceSynchronize();
 
+		cudaMemcpy(&images_out_gpu_serial[i * IMG_HEIGHT*IMG_WIDTH], image_out, IMG_WIDTH*IMG_HEIGHT, cudaMemcpyDefault);
+
+		// TODO: debug, remove later ===================================================
+		bool bad = 0;
+		for(int m = 0; m < IMG_WIDTH * IMG_HEIGHT; m++) {
+			if (images_out_gpu_serial[(i*IMG_WIDTH*IMG_HEIGHT) + m] != images_out_cpu[(i*IMG_WIDTH*IMG_HEIGHT) + m]) {
+				printf("CPU value[%d]: %d\n",m, images_out_cpu[(i*IMG_WIDTH*IMG_HEIGHT) + m]);
+				printf("GPU value[%d]: %d\n",m, images_out_gpu_serial[(i*IMG_WIDTH*IMG_HEIGHT) + m]);
+				bad = 1;
+				break;
+			}
+		}
+		printf("\n%s\n", (bad) ? "Failed" : "Success");
+		// till here ================================================================
+		continue;
+
 		// TODO: debug, remove later
 		cudaMemcpy(cpu_histogram, temp_histogram, 256 * sizeof(*temp_histogram), cudaMemcpyDefault);
 		cudaMemcpy(cpu_cdf, temp_cdf, 256 * sizeof(*temp_cdf), cudaMemcpyDefault);
@@ -268,19 +288,6 @@ int main() {
 
 			printf("\n\n");
 		}
-
-		cudaMemcpy(&images_out_gpu_serial[i * IMG_HEIGHT*IMG_WIDTH], image_out, IMG_WIDTH*IMG_HEIGHT, cudaMemcpyDefault);
-
-		bool bad = 0;
-		for(int m = 0; m < IMG_WIDTH * IMG_HEIGHT; m++) {
-			if (images_out_gpu_serial[(i*IMG_WIDTH*IMG_HEIGHT) + m] != images_out_cpu[(i*IMG_WIDTH*IMG_HEIGHT) + m]) {
-				printf("CPU value[%d]: %d\n",m, images_out_cpu[(i*IMG_WIDTH*IMG_HEIGHT) + m]);
-				printf("GPU value[%d]: %d\n",m, images_out_gpu_serial[(i*IMG_WIDTH*IMG_HEIGHT) + m]);
-				bad = 1;
-				break;
-			}
-		}
-		printf("\n%s\n", (bad) ? "Failed" : "Success");
 
     }
 	
