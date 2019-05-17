@@ -213,13 +213,13 @@ int main() {
     //TODO: in a for loop:
     for (int i=0; i < N_IMAGES; i++) {
 		// Copying src image from the input images
-		cudaMemcpy(image_in, &images_in[i * IMG_WIDTH*IMG_HEIGHT], IMG_WIDTH*IMG_HEIGHT, cudaMemcpyDefault);
+		CUDA_CHECK(cudaMemcpy(image_in, &images_in[i * IMG_WIDTH*IMG_HEIGHT], IMG_WIDTH*IMG_HEIGHT, cudaMemcpyDefault));
 
 		process_image_kernel <<< 1, NUM_THREADS >>> (image_in, image_out);  
 
-		cudaDeviceSynchronize();
+		CUDA_CHECK(cudaDeviceSynchronize());
 
-		cudaMemcpy(&images_out_gpu_serial[i * IMG_HEIGHT*IMG_WIDTH], image_out, IMG_WIDTH*IMG_HEIGHT, cudaMemcpyDefault);
+		CUDA_CHECK(cudaMemcpy(&images_out_gpu_serial[i * IMG_HEIGHT*IMG_WIDTH], image_out, IMG_WIDTH*IMG_HEIGHT, cudaMemcpyDefault));
     }
 
 	cudaFree(image_in);
@@ -237,14 +237,14 @@ int main() {
 
     //TODO: copy all input images from images_in to the GPU memory you allocated
     t_start = get_time_msec(); //Do not change
-	cudaMemcpy(image_in, images_in, N_IMAGES*IMG_WIDTH*IMG_HEIGHT, cudaMemcpyDefault);
+	CUDA_CHECK(cudaMemcpy(image_in, images_in, N_IMAGES*IMG_WIDTH*IMG_HEIGHT, cudaMemcpyDefault));
 
     //TODO: invoke a kernel with N_IMAGES threadblocks, each working on a different image
 	process_image_kernel <<< N_IMAGES, NUM_THREADS >>> (image_in, image_out);
-	cudaDeviceSynchronize();
+	CUDA_CHECK(cudaDeviceSynchronize());
 
     //TODO: copy output images from GPU memory to images_out_gpu_bulk
-	cudaMemcpy(images_out_gpu_bulk, image_out, N_IMAGES*IMG_WIDTH*IMG_HEIGHT, cudaMemcpyDefault);
+	CUDA_CHECK(cudaMemcpy(images_out_gpu_bulk, image_out, N_IMAGES*IMG_WIDTH*IMG_HEIGHT, cudaMemcpyDefault));
 
     t_finish = get_time_msec(); //Do not change
 
