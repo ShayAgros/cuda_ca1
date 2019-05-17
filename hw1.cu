@@ -8,7 +8,7 @@
 #define IMG_HEIGHT 256
 #define IMG_WIDTH 256
 //#define N_IMAGES 10000
-#define N_IMAGES 1
+#define N_IMAGES 500
 
 #define NUM_THREADS 256
 
@@ -88,13 +88,13 @@ __device__ int arr_min(int arr[], int arr_size) {//return the min
 
 // this function implements the Kiggle-Stone algorithm
 __device__ void prefix_sum(int arr[], int arr_size, int histogram[]) {
- 
+
 	int tbsize = blockDim.x;
 	int tid = threadIdx.x;
 	int inc;
- 	
+ 
  	for (int stride = 1; stride < tbsize; stride *= 2) {
-		
+	
 		if (tid >= arr_size)
 			continue;
 
@@ -119,7 +119,8 @@ __device__ void mapCalc(int map[], int min, int cdf[]) {
     map[id] = map_value;
 }
 
-__global__ void process_image_kernel(uchar *in, uchar *out, int temp_histogram[], int temp_cdf[]) {
+__global__ void process_image_kernel(uchar *in, uchar *out,
+									 int temp_histogram[], int temp_cdf[]) {
 
     __shared__ int l_histogram[256];
     __shared__ int l_cdf[256];
@@ -131,8 +132,7 @@ __global__ void process_image_kernel(uchar *in, uchar *out, int temp_histogram[]
 	// zero histogram
 	l_histogram[tid] = 0;
 
-	if(!tid)
-		printf("bid is: %d\n", bid);
+	__syncthreads();
 
 	for(int i = tid; i < IMG_WIDTH * IMG_HEIGHT; i += tbsize)
 		atomicAdd(&l_histogram[in[(IMG_WIDTH * IMG_HEIGHT)*bid + i]], 1);
@@ -155,24 +155,22 @@ __global__ void process_image_kernel(uchar *in, uchar *out, int temp_histogram[]
 	__syncthreads();
 
     int min = arr_min(l_histogram, 256);
-    
-    if(tid == 0)
-    	printf("min is: %d\n", min);
-	
+
 	// for debug purposes TODO: delete
 	temp_cdf[tid] = l_histogram[tid];
-	
+
 	__syncthreads();
 
 	mapCalc(map, min, l_cdf);
-	
+
 	__syncthreads();
-    
+   
 
     for(int i = tid; i < IMG_WIDTH * IMG_HEIGHT; i += tbsize) {
-		out[i] = map[in[(IMG_WIDTH * IMG_HEIGHT)*bid + i]];
+		out[(IMG_WIDTH * IMG_HEIGHT)*bid + i] =
+			map[in[(IMG_WIDTH * IMG_HEIGHT)*bid + i]];
     }
-	
+
 	__syncthreads();
 
     return ; //TODO
@@ -236,17 +234,19 @@ int main() {
     for (int i=0; i < N_IMAGES; i++) {
 		// Copying src image from the input images
 		cudaMemcpy(image_in, &images_in[i * IMG_WIDTH*IMG_HEIGHT], IMG_WIDTH*IMG_HEIGHT, cudaMemcpyDefault);
-		
+	
 		// TODO: debug, remove later
 		cudaMemset(temp_histogram, 0, 256 * sizeof(*temp_histogram));
 		cudaMemset(temp_cdf, 0, 256 * sizeof(*temp_cdf));
 
-		process_image_kernel <<< 1, NUM_THREADS >>> (image_in, image_out, temp_histogram, temp_cdf);   
+		process_image_kernel <<< 1, NUM_THREADS >>> (image_in, image_out, temp_histogram, temp_cdf);  
 
 		cudaDeviceSynchronize();
 
 		cudaMemcpy(&images_out_gpu_serial[i * IMG_HEIGHT*IMG_WIDTH], image_out, IMG_WIDTH*IMG_HEIGHT, cudaMemcpyDefault);
 
+
+		continue;
 		// TODO: debug, remove later ===================================================
 		bool bad = 0;
 		for(int m = 0; m < IMG_WIDTH * IMG_HEIGHT; m++) {
@@ -259,7 +259,6 @@ int main() {
 		}
 		printf("\n%s\n", (bad) ? "Failed" : "Success");
 		// till here ================================================================
-		continue;
 
 		// TODO: debug, remove later
 		cudaMemcpy(cpu_histogram, temp_histogram, 256 * sizeof(*temp_histogram), cudaMemcpyDefault);
@@ -290,13 +289,10 @@ int main() {
 		}
 
     }
-	
+
 	cudaFree(image_in);
 	cudaFree(image_out);
-	//////////////////////////TODO: remove later
-	cudaFree(temp_histogram);
-	cudaFree(temp_cdf);
-	
+
     t_finish = get_time_msec(); //Do not change
     distance_sqr = distance_sqr_between_image_arrays(images_out_cpu, images_out_gpu_serial); // Do not change
     printf("total time %f [msec]  distance from baseline %lld (should be zero)\n", t_finish - t_start, distance_sqr); //Do not change
@@ -304,21 +300,31 @@ int main() {
     // GPU bulk
     printf("\n=== GPU Bulk ===\n"); //Do not change
     //TODO: allocate GPU memory for a all input images and all output images
-    t_start = get_time_msec(); //Do not change
-    //TODO: copy all input images from images_in to the GPU memory you allocated
-    //TODO: invoke a kernel with N_IMAGES threadblocks, each working on a different image
-    //TODO: copy output images from GPU memory to images_out_gpu_bulk
 	CUDA_CHECK( cudaMalloc((void **)&image_in, N_IMAGES * IMG_HEIGHT * IMG_WIDTH) );
     CUDA_CHECK( cudaMalloc((void **)&image_out, N_IMAGES * IMG_HEIGHT * IMG_WIDTH) );
+
+    //TODO: copy all input images from images_in to the GPU memory you allocated
+    t_start = get_time_msec(); //Do not change
 	cudaMemcpy(image_in, images_in, N_IMAGES*IMG_WIDTH*IMG_HEIGHT, cudaMemcpyDefault);
-	process_image_kernel <<< N_IMAGES, NUM_THREADS >>> (image_in, image_out, temp_histogram, temp_cdf);   
-	cudaMemcpy(images_out_gpu_bulk, image_out, N_IMAGES*IMG_WIDTH*IMG_HEIGHT, cudaMemcpyDefault);	
+
+    //TODO: invoke a kernel with N_IMAGES threadblocks, each working on a different image
+	process_image_kernel <<< N_IMAGES, NUM_THREADS >>> (image_in, image_out, temp_histogram, temp_cdf);
+	cudaDeviceSynchronize();
+
+    //TODO: copy output images from GPU memory to images_out_gpu_bulk
+	cudaMemcpy(images_out_gpu_bulk, image_out, N_IMAGES*IMG_WIDTH*IMG_HEIGHT, cudaMemcpyDefault);
+
+    t_finish = get_time_msec(); //Do not change
+
 	cudaFree(image_in);
 	cudaFree(image_out);
-	
-    t_finish = get_time_msec(); //Do not change
+
     distance_sqr = distance_sqr_between_image_arrays(images_out_cpu, images_out_gpu_bulk); // Do not change
     printf("total time %f [msec]  distance from baseline %lld (should be zero)\n", t_finish - t_start, distance_sqr); //Do not chhange
+
+	//////////////////////////TODO: remove later
+	cudaFree(temp_histogram);
+	cudaFree(temp_cdf);
 
     return 0;
 }
